@@ -4,158 +4,196 @@ using System.Data;
 
 namespace LinqToDB.DataProvider.SapHana
 {
-	using Common;
-	using Data;
-	using Extensions;
-	using Mapping;
-	using SqlProvider;
+    using System.Data.Common;
 
-	public class SapHanaDataProvider : DynamicDataProviderBase
-	{
-		public SapHanaDataProvider()
-			: this(ProviderName.SapHana, new SapHanaMappingSchema())
-		{
-		}
+    using Common;
+    using Data;
+    using Extensions;
+    using Mapping;
+    using SqlProvider;
 
-		protected SapHanaDataProvider(string name, MappingSchema mappingSchema)
-			: base(name, mappingSchema)
-		{
-			//supported flags
-			SqlProviderFlags.IsCountSubQuerySupported = true;
-			
-			//Exception: Sap.Data.Hana.HanaException
-			//Message: single-row query returns more than one row
-			//when expression returns more than 1 row
-			//mark this as supported, it's better to throw exception 
-			//instead of replace with left join, in which case returns incorrect data
-			SqlProviderFlags.IsSubQueryColumnSupported = true;
+    public class SapHanaDataProvider : DynamicDataProviderBase
+    {
+        public SapHanaDataProvider()
+            : this(ProviderName.SapHana, new SapHanaMappingSchema())
+        {
+        }
 
-			SqlProviderFlags.IsTakeSupported = true;
+        protected SapHanaDataProvider(string name, MappingSchema mappingSchema)
+            : base(name, mappingSchema)
+        {
+            //supported flags
+            SqlProviderFlags.IsCountSubQuerySupported = true;
 
-			//testing
+            //Exception: Sap.Data.Hana.HanaException
+            //Message: single-row query returns more than one row
+            //when expression returns more than 1 row
+            //mark this as supported, it's better to throw exception 
+            //instead of replace with left join, in which case returns incorrect data
+            SqlProviderFlags.IsSubQueryColumnSupported = true;
 
-			//not supported flags
-			SqlProviderFlags.IsSubQueryTakeSupported   = false;
-			SqlProviderFlags.IsApplyJoinSupported      = false;
-			SqlProviderFlags.IsInsertOrUpdateSupported = false;
+            SqlProviderFlags.IsTakeSupported = true;
 
-			_sqlOptimizer = new SapHanaSqlOptimizer(SqlProviderFlags);
-		}
+            //testing
 
-		public override string ConnectionNamespace { get { return "Sap.Data.Hana"; } }
+            //not supported flags
+            SqlProviderFlags.IsSubQueryTakeSupported = false;
+            SqlProviderFlags.IsApplyJoinSupported = false;
+            SqlProviderFlags.IsInsertOrUpdateSupported = false;
 
-		protected override string ConnectionTypeName
-		{
-			get
-			{
-				return "{0}.{1}, {2}".Args(ConnectionNamespace, "HanaConnection", SapHanaTools.AssemblyName);
-			}
-		}
+            _sqlOptimizer = new SapHanaSqlOptimizer(SqlProviderFlags);
+        }
 
-		protected override string DataReaderTypeName
-		{
-			get
-			{
-				return "{0}.{1}, {2}".Args(ConnectionNamespace, "HanaDataReader", SapHanaTools.AssemblyName);
-			}
-		}
+        public override string ConnectionNamespace { get { return "Sap.Data.Hana"; } }
 
-		static Action<IDbDataParameter> _setText;
-		static Action<IDbDataParameter> _setNText;
-		static Action<IDbDataParameter> _setBlob;
-		static Action<IDbDataParameter> _setVarBinary;
+        protected override string ConnectionTypeName
+        {
+            get
+            {
+                return "{0}.{1}, {2}".Args(ConnectionNamespace, "HanaConnection", SapHanaTools.AssemblyName);
+            }
+        }
+
+        protected override string DataReaderTypeName
+        {
+            get
+            {
+                return "{0}.{1}, {2}".Args(ConnectionNamespace, "HanaDataReader", SapHanaTools.AssemblyName);
+            }
+        }
+
+        private Type _dataReaderType;
+        public override Type DataReaderType
+        {
+            get
+            {
+                if (_dataReaderType != null)
+                    return _dataReaderType;
+
+                var assembly = DbProviderFactories
+                    .GetFactory("Sap.Data.Hana").GetType().Assembly;
+
+                _dataReaderType =
+                    Type.GetType("{0}.{1}, {2}".Args(ConnectionNamespace, "HanaDataReader", assembly.GetName()));
 
 
+                return _dataReaderType;
+            }
+        }
 
-		protected override void OnConnectionTypeCreated(Type connectionType)
-		{
-			const String paramTypeName = "HanaParameter";
-			const String dataTypeName  = "HanaDbType";
+        static Action<IDbDataParameter> _setText;
+        static Action<IDbDataParameter> _setNText;
+        static Action<IDbDataParameter> _setBlob;
+        static Action<IDbDataParameter> _setVarBinary;
 
-			_setText      = GetSetParameter(connectionType, paramTypeName, dataTypeName, dataTypeName, "Text");
-			_setNText     = GetSetParameter(connectionType, paramTypeName, dataTypeName, dataTypeName, "NClob");
-			_setBlob      = GetSetParameter(connectionType, paramTypeName, dataTypeName, dataTypeName, "Blob");
-			_setVarBinary = GetSetParameter(connectionType, paramTypeName, dataTypeName, dataTypeName, "VarBinary");
-		}
+        volatile Type _connectionType;
+        protected override Type GetConnectionType()
+        {
+            if (_connectionType == null)
+                lock (_sync)
+                    if (_connectionType == null)
+                    {
+                        var db = DbProviderFactories
+                          .GetFactory("Sap.Data.Hana")
+                          .CreateConnection();
 
-		public override SchemaProvider.ISchemaProvider GetSchemaProvider()
-		{
-			return new SapHanaSchemaProvider();
-		}
+                        _connectionType = db.GetType();
+                        
+                        OnConnectionTypeCreated(_connectionType);
+                    }
 
-		public override ISqlBuilder CreateSqlBuilder()
-		{
-			return new SapHanaSqlBuilder(GetSqlOptimizer(), SqlProviderFlags, MappingSchema.ValueToSqlConverter);
-		}
+            return _connectionType;
+        }
 
-		readonly ISqlOptimizer _sqlOptimizer;
+        protected override void OnConnectionTypeCreated(Type connectionType)
+        {
+            const String paramTypeName = "HanaParameter";
+            const String dataTypeName = "HanaDbType";
 
-		public override ISqlOptimizer GetSqlOptimizer()
-		{
-			return _sqlOptimizer;
-		}
+            _setText = GetSetParameter(connectionType, paramTypeName, dataTypeName, dataTypeName, "Text");
+            _setNText = GetSetParameter(connectionType, paramTypeName, dataTypeName, dataTypeName, "NClob");
+            _setBlob = GetSetParameter(connectionType, paramTypeName, dataTypeName, dataTypeName, "Blob");
+            _setVarBinary = GetSetParameter(connectionType, paramTypeName, dataTypeName, dataTypeName, "VarBinary");
+        }
 
-		public override Type ConvertParameterType(Type type, DataType dataType)
-		{
-			if (type.IsNullable())
-				type = type.ToUnderlying();
+        public override SchemaProvider.ISchemaProvider GetSchemaProvider()
+        {
+            return new SapHanaSchemaProvider();
+        }
 
-			switch (dataType)
-			{
-				case DataType.NChar:
-				case DataType.Char:
-					type = typeof (String);
-					break;
-				case DataType.Boolean: if (type == typeof(bool)) return typeof(byte);  break;
-				case DataType.Guid   : if (type == typeof(Guid)) return typeof(string); break;
-			}
+        public override ISqlBuilder CreateSqlBuilder()
+        {
+            return new SapHanaSqlBuilder(GetSqlOptimizer(), SqlProviderFlags, MappingSchema.ValueToSqlConverter);
+        }
 
-			return base.ConvertParameterType(type, dataType);
-		}
+        readonly ISqlOptimizer _sqlOptimizer;
 
-		public override void SetParameter(IDbDataParameter parameter, string name, DataType dataType, object value)
-		{
-			switch (dataType)
-			{
-				case DataType.Boolean:
-					dataType = DataType.Byte;
-					if (value is bool)
-						value = (bool)value ? (byte)1 : (byte)0;
-					break;
-				case DataType.Guid:
-					if (value != null)
-						value = value.ToString();
-					dataType = DataType.Char;
-					parameter.Size = 36;
-					break;
-			}
+        public override ISqlOptimizer GetSqlOptimizer()
+        {
+            return _sqlOptimizer;
+        }
 
-			base.SetParameter(parameter, name, dataType, value);
-		}
+        public override Type ConvertParameterType(Type type, DataType dataType)
+        {
+            if (type.IsNullable())
+                type = type.ToUnderlying();
 
-		protected override void SetParameterType(IDbDataParameter parameter, DataType dataType)
-		{
-			if (parameter is BulkCopyReader.Parameter)
-				return;
+            switch (dataType)
+            {
+                case DataType.NChar:
+                case DataType.Char:
+                    type = typeof(String);
+                    break;
+                case DataType.Boolean: if (type == typeof(bool)) return typeof(byte); break;
+                case DataType.Guid: if (type == typeof(Guid)) return typeof(string); break;
+            }
 
-			switch (dataType)
-			{
-				case DataType.Text  : _setText(parameter);      break;
-				case DataType.Image : _setBlob(parameter);      break;
-				case DataType.NText : _setNText(parameter);     break;
-				case DataType.Binary: _setVarBinary(parameter); break;
-			}
-			base.SetParameterType(parameter, dataType);
-		}
+            return base.ConvertParameterType(type, dataType);
+        }
 
-		public override BulkCopyRowsCopied BulkCopy<T>(
-			[JetBrains.Annotations.NotNull] DataConnection dataConnection, BulkCopyOptions options, IEnumerable<T> source)
-		{
-			return new SapHanaBulkCopy(this, GetConnectionType()).BulkCopy(
-				options.BulkCopyType == BulkCopyType.Default ? SapHanaTools.DefaultBulkCopyType : options.BulkCopyType,
-				dataConnection,
-				options,
-				source);
-		}
-	}
+        public override void SetParameter(IDbDataParameter parameter, string name, DataType dataType, object value)
+        {
+            switch (dataType)
+            {
+                case DataType.Boolean:
+                    dataType = DataType.Byte;
+                    if (value is bool)
+                        value = (bool)value ? (byte)1 : (byte)0;
+                    break;
+                case DataType.Guid:
+                    if (value != null)
+                        value = value.ToString();
+                    dataType = DataType.Char;
+                    parameter.Size = 36;
+                    break;
+            }
+
+            base.SetParameter(parameter, name, dataType, value);
+        }
+
+        protected override void SetParameterType(IDbDataParameter parameter, DataType dataType)
+        {
+            if (parameter is BulkCopyReader.Parameter)
+                return;
+
+            switch (dataType)
+            {
+                case DataType.Text: _setText(parameter); break;
+                case DataType.Image: _setBlob(parameter); break;
+                case DataType.NText: _setNText(parameter); break;
+                case DataType.Binary: _setVarBinary(parameter); break;
+            }
+            base.SetParameterType(parameter, dataType);
+        }
+
+        public override BulkCopyRowsCopied BulkCopy<T>(
+            [JetBrains.Annotations.NotNull] DataConnection dataConnection, BulkCopyOptions options, IEnumerable<T> source)
+        {
+            return new SapHanaBulkCopy(this, GetConnectionType()).BulkCopy(
+                options.BulkCopyType == BulkCopyType.Default ? SapHanaTools.DefaultBulkCopyType : options.BulkCopyType,
+                dataConnection,
+                options,
+                source);
+        }
+    }
 }
