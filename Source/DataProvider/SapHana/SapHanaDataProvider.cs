@@ -62,7 +62,8 @@ namespace LinqToDB.DataProvider.SapHana
             }
         }
 
-        private Type _dataReaderType;
+        private Type _dataReaderType;
+
         public override Type DataReaderType
         {
             get
@@ -86,7 +87,8 @@ namespace LinqToDB.DataProvider.SapHana
         static Action<IDbDataParameter> _setBlob;
         static Action<IDbDataParameter> _setVarBinary;
 
-        volatile Type _connectionType;
+        volatile Type _connectionType;
+
         protected override Type GetConnectionType()
         {
             if (_connectionType == null)
